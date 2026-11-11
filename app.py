@@ -5,6 +5,10 @@
 # e yt-dlp como motor opcional para paginas de video (ex.: Instagram Reels,
 # TikTok, YouTube, X, Facebook) - mesmo motor do DX Downloader.
 #
+# v1.0.3 - perfil/carrossel LISTA cada post: a busca usa yt-dlp extract_info
+#   (flat) e preenche a lista com 1 item por post, em vez do placeholder unico
+#   "post-perfil" da v1.0.2 — sem isso o usuario via "1 midia" num perfil cheio.
+#   Se o Instagram pedir login, a lista vem vazia/erro e o app avisa cookies.txt.
 # v1.0.2 - carrossel e perfil inteiro (Instagram/TikTok): post /p/ baixa todas
 #   as midias do carrossel e perfil (instagram.com/<usuario>/, tiktok.com/@<usuario>)
 #   baixa todos os posts via yt-dlp (noplaylist=False); precisa de cookies.txt se pedir login.
@@ -45,7 +49,7 @@ except Exception:
     BeautifulSoup = None
 
 APP_NAME = "DX Image Downloader"
-APP_VERSION = "1.0.2"
+APP_VERSION = "1.0.3"
 
 BG = "#0B0E13"
 BG2 = "#151A22"
@@ -477,6 +481,63 @@ def download_direct(url: str, dest: Path, session: requests.Session,
     return dest
 
 
+def list_social_media(url: str, cookies_file: str | None):
+    """Lista as midias de um post/carrossel/perfil via yt-dlp, sem baixar.
+    Devolve [{'url','kind','name','ext','width','height','source','size','social'}],
+    1 item por post (carrossel conta como 1 post aqui; o download dele baixa
+    todas as fotos/videos do carrossel). Levanta excecao se o site pedir login
+    ou nao devolver nada — o chamador mostra a dica do cookies.txt."""
+    from yt_dlp import YoutubeDL
+    opts = {
+        "quiet": True,
+        "no_warnings": True,
+        "noplaylist": False,
+        "extract_flat": True,
+        "skip_download": True,
+        "socket_timeout": 30,
+        "retries": 3,
+    }
+    if cookies_file:
+        opts["cookiefile"] = cookies_file
+    with YoutubeDL(opts) as ydl:
+        info = ydl.extract_info(url, download=False)
+    if not info:
+        raise RuntimeError("yt-dlp nao devolveu informacoes da pagina")
+    entries = info.get("entries")
+    items = []
+    if entries:
+        for e in entries:
+            if not e:
+                continue
+            eid = str(e.get("id") or "")
+            title = (e.get("title") or eid or "post").strip()
+            page = e.get("webpage_url") or e.get("url") or url
+            ext = ("." + str(e.get("ext") or "").lower()) if e.get("ext") else ""
+            kind = "video"
+            if ext in IMAGE_EXTS:
+                kind = "image"
+            name = f"{title} [{eid}]" if eid else title
+            if ext and not name.lower().endswith(ext):
+                name += ext
+            items.append({"url": page, "kind": kind, "name": sanitize_filename(name),
+                          "ext": ext, "width": None, "height": None,
+                          "source": "yt-dlp", "size": None, "social": True})
+        if not items:
+            raise RuntimeError("yt-dlp listou 0 posts — o site pode estar pedindo login")
+        return items
+    # Post unico (sem entries): 1 item com a propria URL
+    eid = str(info.get("id") or "")
+    title = (info.get("title") or eid or "post").strip()
+    ext = ("." + str(info.get("ext") or "").lower()) if info.get("ext") else ""
+    kind = "image" if ext in IMAGE_EXTS else "video"
+    name = f"{title} [{eid}]" if eid else title
+    if ext and not name.lower().endswith(ext):
+        name += ext
+    return [{"url": url, "kind": kind, "name": sanitize_filename(name),
+             "ext": ext, "width": None, "height": None,
+             "source": "yt-dlp", "size": None, "social": True}]
+
+
 def download_with_ytdlp(url: str, out_dir: str, cookies_file: str | None,
                         progress_hook, ffmpeg_path: str | None):
     """Baixa pagina de video (Reels/TikTok/YouTube etc.), carrossel ou perfil
@@ -814,22 +875,35 @@ class App(tk.Tk):
     def _scan_worker(self, url: str):
         try:
             # Pagina de video (Reels etc.), carrossel ou perfil inteiro:
-            # o yt-dlp resolve os arquivos diretos. A lista mostra 1 item
-            # (o post/perfil) e o download usa o yt-dlp — carrossel baixa
-            # TODAS as fotos/videos do post, perfil baixa todos os posts.
+            # lista CADA post via yt-dlp (flat), para a lista mostrar o total
+            # real — na v1.0.2 aparecia so 1 item "post-perfil" e parecia que
+            # so tinha 1 video num perfil cheio.
             if is_social_url(url):
                 kind = "Perfil" if is_social_profile_url(url) else "Post/vídeo"
                 self._log(f"{kind} detectado: {url}")
-                self._log("Vou baixar via yt-dlp (os arquivos originais, não só a miniatura).")
-                if is_social_profile_url(url):
-                    self._log("Perfil inteiro pode demorar e o Instagram/TikTok pode pedir login — use cookies.txt se pedir.")
-                self.events.put(("count", f"{kind} — clique em Baixar selecionadas para baixar via yt-dlp (carrossel: todas as mídias do post)."))
-                self.media = [{"url": url, "kind": "video", "name": "post-perfil",
-                               "ext": "", "width": None, "height": None,
-                               "source": "yt-dlp", "size": None, "social": True}]
-                self.selected = {0}
+                self._log("Listando os posts via yt-dlp (pode demorar num perfil cheio)…")
+                try:
+                    items = list_social_media(url, self.cookies_file or None)
+                except Exception as e:
+                    self._log(f"Nao consegui listar os posts: {e}")
+                    self._log("Dica: o Instagram quase sempre pede login para listar perfil — "
+                              "exporte os cookies com a extensao Get cookies.txt LOCALLY "
+                              "(navegador logado no Instagram) e escolha o arquivo em Cookies, "
+                              "depois clique em Buscar midias de novo.")
+                    self._set_status("Falha ao listar — Instagram pode estar pedindo login. Veja o registro.")
+                    # Mantem o item unico como plano B: Baixar selecionadas
+                    # tenta baixar o perfil/post inteiro via yt-dlp mesmo assim.
+                    self.media = [{"url": url, "kind": "video", "name": "post-perfil",
+                                   "ext": "", "width": None, "height": None,
+                                   "source": "yt-dlp", "size": None, "social": True}]
+                    self.selected = {0}
+                    self.events.put(("refresh", None))
+                    return
+                self.media = items
+                self.selected = set(range(len(items)))
                 self.events.put(("refresh", None))
-                self._set_status("Pronto para baixar via yt-dlp.")
+                self._log(f"{len(items)} posts encontrados.")
+                self._set_status(f"{len(items)} posts encontrados — revise a seleção e clique em Baixar selecionadas.")
                 return
             session = make_session(self.cookies_file or None)
             html, final_url = fetch_page(url, session)

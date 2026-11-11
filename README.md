@@ -37,6 +37,7 @@ Use apenas para baixar conteúdo que você tem direito de baixar / para uso pess
 Não use para conteúdo vazado, sem consentimento ou protegido por direitos autorais.
 
 ## Versões
+- **v1.0.3** — perfil/carrossel agora **lista cada post** (via yt-dlp, sem baixar) em vez de mostrar 1 item “post-perfil”. Se o Instagram pedir login, a lista vem vazia e o app avisa para usar `cookies.txt`.
 - **v1.0.2** — carrossel e perfil inteiro (Instagram/TikTok) via yt-dlp.
 - **v1.0.1** — botão **Limpar** ao lado de Buscar mídias (limpa o link, a lista e a seleção para colar outra URL; cancela a tarefa em andamento, sem apagar arquivos já baixados).
 - **v1.0.0** — primeira versão (imagens + vídeos, Reels via yt-dlp).
