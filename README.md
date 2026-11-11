@@ -35,6 +35,7 @@ Use apenas para baixar conteúdo que você tem direito de baixar / para uso pess
 Não use para conteúdo vazado, sem consentimento ou protegido por direitos autorais.
 
 ## Versões
+- **v1.0.1** — botão **Limpar** ao lado de Buscar mídias (limpa o link, a lista e a seleção para colar outra URL; cancela a tarefa em andamento, sem apagar arquivos já baixados).
 - **v1.0.0** — primeira versão (imagens + vídeos, Reels via yt-dlp).
 
 ## Estrutura

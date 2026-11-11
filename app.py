@@ -5,6 +5,7 @@
 # e yt-dlp como motor opcional para paginas de video (ex.: Instagram Reels,
 # TikTok, YouTube, X, Facebook) - mesmo motor do DX Downloader.
 #
+# v1.0.1 - botao Limpar (limpa link, lista e selecao para outra URL).
 # v1.0.0 - primeira versao:
 #  - Cola a URL de uma pagina e lista TODAS as imagens e videos encontrados
 #  - Fotos: <img>, <picture>/<source>, srcset (maior versao), data-src,
@@ -41,7 +42,7 @@ except Exception:
     BeautifulSoup = None
 
 APP_NAME = "DX Image Downloader"
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.0.1"
 
 BG = "#0B0E13"
 BG2 = "#151A22"
@@ -532,6 +533,8 @@ class App(tk.Tk):
         tk.Button(row, text="Buscar mídias", bg=ACCENT, fg="#0B0E13", relief="flat",
                   font=("Segoe UI", 11, "bold"),
                   command=self._start_scan).pack(side="left", padx=(6, 0))
+        tk.Button(row, text="Limpar", bg="#1E2530", fg=FG, relief="flat",
+                  command=self._clear_all).pack(side="left", padx=(6, 0))
 
         # Filtros
         frow = tk.Frame(self, bg=BG)
@@ -737,6 +740,22 @@ class App(tk.Tk):
     def _media_type(self):
         return {"Todas": "all", "Fotos": "image", "Vídeos": "video"}.get(self.type_var.get(), "all")
 
+    def _clear_all(self):
+        """Botao Limpar: limpa o link, a lista e a selecao para colar outra URL.
+        Se houver busca/download rodando, cancela primeiro. Nao apaga arquivos
+        ja baixados nem o registro."""
+        self.cancel_flag.set()
+        self.url_var.set("")
+        self.media = []
+        self.selected = set()
+        self.last_url = ""
+        self._refresh_tree()
+        self.progress["value"] = 0
+        self.count_var.set("Nenhuma mídia encontrada ainda. Cole uma URL e clique em Buscar mídias.")
+        self._set_status("Pronto.")
+        self._log("Limpo — pronto para outra URL.")
+        self.url_entry.focus_set()
+
     # ---------- varredura ----------
     def _start_scan(self):
         url = self.url_var.get().strip()
@@ -775,6 +794,10 @@ class App(tk.Tk):
                 return
             session = make_session(self.cookies_file or None)
             html, final_url = fetch_page(url, session)
+            if self.cancel_flag.is_set():
+                # Limpar foi clicado durante a busca: nao repovoar a lista
+                self._log("Busca cancelada pelo Limpar.")
+                return
             self._log(f"Página carregada: {final_url} ({len(html)} caracteres)")
             media = extract_media(html, final_url,
                                   only_same_domain=self.same_domain_var.get(),
