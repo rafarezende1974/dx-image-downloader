@@ -13,6 +13,8 @@ com o nome do site + data/hora.
 - **Página de vídeo (Reels, TikTok, YouTube, X, Facebook):** baixa o vídeo
   original via **yt-dlp** (mesmo motor do DX Downloader) — se pedir login,
   use `cookies.txt` (extensão “Get cookies.txt LOCALLY” no navegador logado)
+- **Carrossel:** um post `/p/<id>/` com várias fotos/vídeos baixa **todas** as mídias do carrossel, não só a primeira
+- **Perfil inteiro (Instagram/TikTok):** colar `instagram.com/<usuario>/` ou `tiktok.com/@<usuario>` baixa todos os posts do perfil via yt-dlp (pode demorar e pedir login — use `cookies.txt`)
 - **Filtros:** tipo (Fotos / Vídeos / Todas), largura mínima, só mesmo domínio,
   ignorar imagens de interface (ícones/logos)
 - Lista com marcação (duplo clique ou Espaço), selecionar todas / desmarcar todas
@@ -35,6 +37,7 @@ Use apenas para baixar conteúdo que você tem direito de baixar / para uso pess
 Não use para conteúdo vazado, sem consentimento ou protegido por direitos autorais.
 
 ## Versões
+- **v1.0.2** — carrossel e perfil inteiro (Instagram/TikTok) via yt-dlp.
 - **v1.0.1** — botão **Limpar** ao lado de Buscar mídias (limpa o link, a lista e a seleção para colar outra URL; cancela a tarefa em andamento, sem apagar arquivos já baixados).
 - **v1.0.0** — primeira versão (imagens + vídeos, Reels via yt-dlp).
 

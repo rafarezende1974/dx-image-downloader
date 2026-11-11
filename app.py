@@ -5,6 +5,9 @@
 # e yt-dlp como motor opcional para paginas de video (ex.: Instagram Reels,
 # TikTok, YouTube, X, Facebook) - mesmo motor do DX Downloader.
 #
+# v1.0.2 - carrossel e perfil inteiro (Instagram/TikTok): post /p/ baixa todas
+#   as midias do carrossel e perfil (instagram.com/<usuario>/, tiktok.com/@<usuario>)
+#   baixa todos os posts via yt-dlp (noplaylist=False); precisa de cookies.txt se pedir login.
 # v1.0.1 - botao Limpar (limpa link, lista e selecao para outra URL).
 # v1.0.0 - primeira versao:
 #  - Cola a URL de uma pagina e lista TODAS as imagens e videos encontrados
@@ -42,7 +45,7 @@ except Exception:
     BeautifulSoup = None
 
 APP_NAME = "DX Image Downloader"
-APP_VERSION = "1.0.1"
+APP_VERSION = "1.0.2"
 
 BG = "#0B0E13"
 BG2 = "#151A22"
@@ -62,6 +65,14 @@ SOCIAL_VIDEO_RE = re.compile(
     r"(youtube\.com/watch|youtu\.be/|youtube\.com/shorts/)|"
     r"(x\.com|twitter\.com)/[^/]+/status/|facebook\.com/[^/]+/videos/|"
     r"facebook\.com/watch/)",
+    re.IGNORECASE,
+)
+
+# Perfil inteiro (Instagram/TikTok): instagram.com/<usuario>/ ou tiktok.com/@<usuario>
+# Carrossel ja cai no padrao acima (/p/<id>/): o yt-dlp baixa TODAS as midias
+# do carrossel, nao so a primeira — por isso o noplaylist abaixo e False.
+SOCIAL_PROFILE_RE = re.compile(
+    r"(instagram\.com/[A-Za-z0-9._]+/?(\?.*)?$|tiktok\.com/@[A-Za-z0-9._]+/?(\?.*)?$)",
     re.IGNORECASE,
 )
 
@@ -370,6 +381,26 @@ def is_social_video_url(url: str) -> bool:
     return bool(SOCIAL_VIDEO_RE.search(url or ""))
 
 
+RESERVED_INSTAGRAM = {"explore", "reels", "reel", "p", "stories", "direct",
+                      "accounts", "settings", "about", "developer", "legal"}
+
+
+def is_social_profile_url(url: str) -> bool:
+    """Perfil inteiro do Instagram/TikTok (sem /p/, /reel/ ou /video/ no caminho)."""
+    if not url:
+        return False
+    if SOCIAL_VIDEO_RE.search(url):
+        return False
+    m = re.search(r"instagram\.com/([A-Za-z0-9._]+)/?", url.strip(), re.IGNORECASE)
+    if m and m.group(1).lower() in RESERVED_INSTAGRAM:
+        return False
+    return bool(SOCIAL_PROFILE_RE.search(url.strip()))
+
+
+def is_social_url(url: str) -> bool:
+    return is_social_video_url(url) or is_social_profile_url(url)
+
+
 def make_session(cookies_file: str | None = None) -> requests.Session:
     s = requests.Session()
     s.headers.update({"User-Agent": UA, "Accept": "text/html,application/xhtml+xml,*/*",
@@ -448,12 +479,15 @@ def download_direct(url: str, dest: Path, session: requests.Session,
 
 def download_with_ytdlp(url: str, out_dir: str, cookies_file: str | None,
                         progress_hook, ffmpeg_path: str | None):
-    """Baixa pagina de video (Reels/TikTok/YouTube etc.) via yt-dlp.
-    Devolve a lista de arquivos baixados. Levanta a excecao original em caso de erro."""
+    """Baixa pagina de video (Reels/TikTok/YouTube etc.), carrossel ou perfil
+    inteiro via yt-dlp. Devolve a lista de arquivos baixados.
+    noplaylist=False de proposito: um carrossel (/p/<id>/) tem varias midias
+    e um perfil tem varios posts — com True o yt-dlp baixaria so a primeira.
+    Levanta a excecao original em caso de erro."""
     from yt_dlp import YoutubeDL
     opts = {
         "outtmpl": str(Path(out_dir) / "%(title)s [%(id)s].%(ext)s"),
-        "noplaylist": True,
+        "noplaylist": False,
         "retries": 10,
         "socket_timeout": 30,
         "continuedl": True,
@@ -779,18 +813,23 @@ class App(tk.Tk):
 
     def _scan_worker(self, url: str):
         try:
-            # Pagina de video (Reels etc.): o yt-dlp resolve o arquivo direto.
-            # Nesse caso a lista mostra 1 item (o video) e o download usa o yt-dlp.
-            if is_social_video_url(url):
-                self._log(f"Página de vídeo detectada: {url}")
-                self._log("Vou listar via yt-dlp (o arquivo original, não só a miniatura).")
-                self.events.put(("count", "Página de vídeo — clique em Baixar selecionadas para baixar via yt-dlp."))
-                self.media = [{"url": url, "kind": "video", "name": "video",
+            # Pagina de video (Reels etc.), carrossel ou perfil inteiro:
+            # o yt-dlp resolve os arquivos diretos. A lista mostra 1 item
+            # (o post/perfil) e o download usa o yt-dlp — carrossel baixa
+            # TODAS as fotos/videos do post, perfil baixa todos os posts.
+            if is_social_url(url):
+                kind = "Perfil" if is_social_profile_url(url) else "Post/vídeo"
+                self._log(f"{kind} detectado: {url}")
+                self._log("Vou baixar via yt-dlp (os arquivos originais, não só a miniatura).")
+                if is_social_profile_url(url):
+                    self._log("Perfil inteiro pode demorar e o Instagram/TikTok pode pedir login — use cookies.txt se pedir.")
+                self.events.put(("count", f"{kind} — clique em Baixar selecionadas para baixar via yt-dlp (carrossel: todas as mídias do post)."))
+                self.media = [{"url": url, "kind": "video", "name": "post-perfil",
                                "ext": "", "width": None, "height": None,
                                "source": "yt-dlp", "size": None, "social": True}]
                 self.selected = {0}
                 self.events.put(("refresh", None))
-                self._set_status("Vídeo pronto para baixar.")
+                self._set_status("Pronto para baixar via yt-dlp.")
                 return
             session = make_session(self.cookies_file or None)
             html, final_url = fetch_page(url, session)
