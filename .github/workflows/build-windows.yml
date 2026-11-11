@@ -1,0 +1,47 @@
+name: Build Windows EXE
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Download ffmpeg + ffprobe (juntar video/audio no yt-dlp)
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip" -OutFile "ffmpeg.zip"
+          Expand-Archive -Path "ffmpeg.zip" -DestinationPath "ffmpeg_extracted"
+          foreach ($name in @("ffmpeg.exe", "ffprobe.exe")) {
+            $f = Get-ChildItem -Path "ffmpeg_extracted" -Recurse -Filter $name | Select-Object -First 1
+            Copy-Item $f.FullName -Destination $name
+          }
+          .\ffmpeg.exe -version
+          .\ffprobe.exe -version
+
+      - name: Generate icon
+        run: python generate_icon.py
+
+      - name: Build EXE (PyInstaller, arquivo unico)
+        run: pyinstaller --noconfirm --clean --onefile --windowed --name DXImageDownloader --icon assets/icon.ico --add-binary "ffmpeg.exe;." --add-binary "ffprobe.exe;." --collect-all yt_dlp --collect-all curl_cffi app.py
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dx-image-downloader-windows
+          path: dist/DXImageDownloader.exe
