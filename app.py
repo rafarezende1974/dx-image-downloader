@@ -5,6 +5,12 @@
 # e yt-dlp como motor opcional para paginas de video (ex.: Instagram Reels,
 # TikTok, YouTube, X, Facebook) - mesmo motor do DX Downloader.
 #
+# v1.0.4 - Instagram "Unable to extract data" mesmo com cookies.txt:
+#   (1) yt-dlp agora imita o Chrome (impersonate, via curl_cffi ja embutido)
+#   para Instagram/TikTok — sem isso o Instagram barra como robo desde 2026.07;
+#   (2) nova opcao "cookies do navegador (Chrome/Firefox/Edge)": o cookies.txt
+#   exportado por extensao muitas vezes nao traz os cookies de sessao, e o
+#   yt-dlp lendo direto do navegador logado e mais confiavel para o Instagram.
 # v1.0.3 - perfil/carrossel LISTA cada post: a busca usa yt-dlp extract_info
 #   (flat) e preenche a lista com 1 item por post, em vez do placeholder unico
 #   "post-perfil" da v1.0.2 — sem isso o usuario via "1 midia" num perfil cheio.
@@ -49,7 +55,7 @@ except Exception:
     BeautifulSoup = None
 
 APP_NAME = "DX Image Downloader"
-APP_VERSION = "1.0.3"
+APP_VERSION = "1.0.4"
 
 BG = "#0B0E13"
 BG2 = "#151A22"
@@ -481,12 +487,34 @@ def download_direct(url: str, dest: Path, session: requests.Session,
     return dest
 
 
-def list_social_media(url: str, cookies_file: str | None):
+def _ytdlp_auth_opts(url: str, cookies_file: str | None, cookies_browser: str | None):
+    """Opcoes de autenticacao/impersonacao do yt-dlp para redes sociais.
+    Instagram/TikTok exigem imitar o Chrome desde 2026.07 (curl_cffi) — sem
+    impersonate o Instagram devolve 'Unable to extract data' mesmo com cookies.
+    cookies do navegador sao mais confiaveis que cookies.txt: o arquivo
+    exportado muitas vezes nao traz os cookies de sessao (sessionid)."""
+    opts: dict = {}
+    if "instagram.com" in (url or "") or "tiktok.com" in (url or ""):
+        opts["impersonate"] = "chrome"
+    if cookies_browser:
+        opts["cookiesfrombrowser"] = (cookies_browser,)
+        log_file(f"yt-dlp: cookies do navegador {cookies_browser}")
+    elif cookies_file:
+        if not Path(cookies_file).exists():
+            log_file(f"yt-dlp: cookies.txt NAO encontrado: {cookies_file}")
+        else:
+            log_file(f"yt-dlp: cookies.txt {cookies_file}")
+        opts["cookiefile"] = cookies_file
+    return opts
+
+
+def list_social_media(url: str, cookies_file: str | None = None,
+                      cookies_browser: str | None = None):
     """Lista as midias de um post/carrossel/perfil via yt-dlp, sem baixar.
     Devolve [{'url','kind','name','ext','width','height','source','size','social'}],
     1 item por post (carrossel conta como 1 post aqui; o download dele baixa
     todas as fotos/videos do carrossel). Levanta excecao se o site pedir login
-    ou nao devolver nada — o chamador mostra a dica do cookies.txt."""
+    ou nao devolver nada — o chamador mostra a dica dos cookies."""
     from yt_dlp import YoutubeDL
     opts = {
         "quiet": True,
@@ -497,10 +525,19 @@ def list_social_media(url: str, cookies_file: str | None):
         "socket_timeout": 30,
         "retries": 3,
     }
-    if cookies_file:
-        opts["cookiefile"] = cookies_file
-    with YoutubeDL(opts) as ydl:
-        info = ydl.extract_info(url, download=False)
+    opts.update(_ytdlp_auth_opts(url, cookies_file, cookies_browser))
+    try:
+        with YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+    except Exception as e:
+        # Sem impersonate disponivel (curl_cffi ausente): tenta sem imitar
+        if "impersonat" in str(e).lower():
+            log_file(f"list_social_media: impersonate falhou ({e}), tentando sem")
+            opts.pop("impersonate", None)
+            with YoutubeDL(opts) as ydl:
+                info = ydl.extract_info(url, download=False)
+        else:
+            raise
     if not info:
         raise RuntimeError("yt-dlp nao devolveu informacoes da pagina")
     entries = info.get("entries")
@@ -539,7 +576,8 @@ def list_social_media(url: str, cookies_file: str | None):
 
 
 def download_with_ytdlp(url: str, out_dir: str, cookies_file: str | None,
-                        progress_hook, ffmpeg_path: str | None):
+                        progress_hook, ffmpeg_path: str | None,
+                        cookies_browser: str | None = None):
     """Baixa pagina de video (Reels/TikTok/YouTube etc.), carrossel ou perfil
     inteiro via yt-dlp. Devolve a lista de arquivos baixados.
     noplaylist=False de proposito: um carrossel (/p/<id>/) tem varias midias
@@ -562,8 +600,7 @@ def download_with_ytdlp(url: str, out_dir: str, cookies_file: str | None,
     }
     if ffmpeg_path:
         opts["ffmpeg_location"] = ffmpeg_path
-    if cookies_file:
-        opts["cookiefile"] = cookies_file
+    opts.update(_ytdlp_auth_opts(url, cookies_file, cookies_browser))
     downloaded = []
 
     def _hook(d):
@@ -595,6 +632,7 @@ class App(tk.Tk):
         self.selected = set()    # indices selecionados (posicao na lista exibida)
         self.out_dir = str(default_download_dir())
         self.cookies_file = ""
+        self.cookies_browser = ""
         self.last_url = ""
 
         style = ttk.Style(self)
@@ -664,16 +702,18 @@ class App(tk.Tk):
         crow = tk.Frame(self, bg=BG)
         crow.pack(fill="x", **pad)
         tk.Label(crow, text="Cookies (só se a página pedir login):", bg=BG, fg=MUTED).pack(side="left")
+        self.cookies_browser = ""
         self.cookies_var = tk.StringVar(value="Sem cookies (páginas públicas)")
         ttk.Combobox(crow, textvariable=self.cookies_var,
-                     values=["Sem cookies (páginas públicas)", "cookies.txt"],
+                     values=["Sem cookies (páginas públicas)", "cookies.txt",
+                             "Cookies do Chrome", "Cookies do Firefox", "Cookies do Edge"],
                      width=32, state="readonly").pack(side="left", padx=(4, 6))
         self.cookies_btn = tk.Button(crow, text="Escolher cookies.txt", bg="#1E2530", fg=FG,
                                      relief="flat", command=self._choose_cookies)
         self.cookies_btn.pack(side="left")
         self.cookies_btn.pack_forget()
         self.cookies_var.trace_add("write", self._on_cookies_choice)
-        tk.Label(crow, text="Reels do Instagram com login pedem cookies.txt (extensão Get cookies.txt LOCALLY).",
+        tk.Label(crow, text="Instagram: prefira Cookies do Chrome (logado) — cookies.txt nem sempre traz a sessão.",
                  bg=BG, fg=MUTED, font=("Segoe UI", 9)).pack(side="left", padx=(8, 0))
 
         # Lista
@@ -748,12 +788,25 @@ class App(tk.Tk):
         self.after(100, self._pump_events)
 
     def _on_cookies_choice(self, *args):
-        if self.cookies_var.get() == "cookies.txt":
+        choice = self.cookies_var.get()
+        browsers = {"Cookies do Chrome": "chrome", "Cookies do Firefox": "firefox",
+                    "Cookies do Edge": "edge"}
+        if choice == "cookies.txt":
+            self.cookies_browser = ""
             self.cookies_btn.pack(side="left")
             self._choose_cookies()
+        elif choice in browsers:
+            # Cookies direto do navegador logado (fecha o navegador antes? nao —
+            # o yt-dlp le o banco; Chrome aberto pode travar a leitura, e o
+            # erro aparece no registro; nesse caso use cookies.txt).
+            self.cookies_browser = browsers[choice]
+            self.cookies_file = ""
+            self.cookies_btn.pack_forget()
+            self._log(f"Cookies do navegador: {self.cookies_browser} (feche o navegador se der erro de leitura)")
         else:
             self.cookies_btn.pack_forget()
             self.cookies_file = ""
+            self.cookies_browser = ""
 
     def _choose_cookies(self):
         path = filedialog.askopenfilename(title="Escolher cookies.txt",
@@ -883,13 +936,14 @@ class App(tk.Tk):
                 self._log(f"{kind} detectado: {url}")
                 self._log("Listando os posts via yt-dlp (pode demorar num perfil cheio)…")
                 try:
-                    items = list_social_media(url, self.cookies_file or None)
+                    items = list_social_media(url, self.cookies_file or None,
+                                              getattr(self, "cookies_browser", "") or None)
                 except Exception as e:
                     self._log(f"Nao consegui listar os posts: {e}")
-                    self._log("Dica: o Instagram quase sempre pede login para listar perfil — "
-                              "exporte os cookies com a extensao Get cookies.txt LOCALLY "
-                              "(navegador logado no Instagram) e escolha o arquivo em Cookies, "
-                              "depois clique em Buscar midias de novo.")
+                    self._log("Dica: tente 'Cookies do Chrome' em Cookies (com o Instagram logado "
+                              "no Chrome) — o cookies.txt muitas vezes nao traz a sessao. "
+                              "Se usar cookies.txt, exporte de novo com o Instagram aberto e "
+                              "logado, depois clique em Buscar midias de novo.")
                     self._set_status("Falha ao listar — Instagram pode estar pedindo login. Veja o registro.")
                     # Mantem o item unico como plano B: Baixar selecionadas
                     # tenta baixar o perfil/post inteiro via yt-dlp mesmo assim.
@@ -988,7 +1042,8 @@ class App(tk.Tk):
                             if tot:
                                 self.events.put(("progress", (idx + dl / tot) / total * 100))
                     files = download_with_ytdlp(item["url"], str(sub), self.cookies_file or None,
-                                                _hook, ffmpeg)
+                                                _hook, ffmpeg,
+                                                getattr(self, "cookies_browser", "") or None)
                     self._log(f"Vídeo baixado: {files}")
                 else:
                     name = sanitize_filename(item["name"])
