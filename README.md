@@ -37,6 +37,7 @@ Use apenas para baixar conteúdo que você tem direito de baixar / para uso pess
 Não use para conteúdo vazado, sem consentimento ou protegido por direitos autorais.
 
 ## Versões
+- **v1.0.5** — erro “Could not copy Chrome cookie database”: o app agora traduz o erro e orienta fechar o navegador, usar **Cookies do Firefox** (feche o Firefox antes) ou `cookies.txt` — o Chrome trava/criptografa o banco de cookies.
 - **v1.0.4** — Instagram “Unable to extract data” mesmo com `cookies.txt`: yt-dlp agora imita o Chrome (impersonation, via curl_cffi) para Instagram/TikTok, e nova opção **Cookies do Chrome/Firefox/Edge** direto do navegador logado (o `cookies.txt` nem sempre traz a sessão).
 - **v1.0.3** — perfil/carrossel agora **lista cada post** (via yt-dlp, sem baixar) em vez de mostrar 1 item “post-perfil”. Se o Instagram pedir login, a lista vem vazia e o app avisa para usar `cookies.txt`.
 - **v1.0.2** — carrossel e perfil inteiro (Instagram/TikTok) via yt-dlp.

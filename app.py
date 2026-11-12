@@ -5,6 +5,10 @@
 # e yt-dlp como motor opcional para paginas de video (ex.: Instagram Reels,
 # TikTok, YouTube, X, Facebook) - mesmo motor do DX Downloader.
 #
+# v1.0.5 - "Could not copy Chrome cookie database" (v1.0.4, com Cookies do Chrome):
+#   o Chrome trava/criptografa o banco de cookies (issue yt-dlp#7271) — o app
+#   agora traduz esse erro e orienta: fechar o navegador, usar Firefox
+#   (feche o Firefox antes) ou cookies.txt (que agora funciona com impersonation).
 # v1.0.4 - Instagram "Unable to extract data" mesmo com cookies.txt:
 #   (1) yt-dlp agora imita o Chrome (impersonate, via curl_cffi ja embutido)
 #   para Instagram/TikTok — sem isso o Instagram barra como robo desde 2026.07;
@@ -55,7 +59,7 @@ except Exception:
     BeautifulSoup = None
 
 APP_NAME = "DX Image Downloader"
-APP_VERSION = "1.0.4"
+APP_VERSION = "1.0.5"
 
 BG = "#0B0E13"
 BG2 = "#151A22"
@@ -508,6 +512,26 @@ def _ytdlp_auth_opts(url: str, cookies_file: str | None, cookies_browser: str | 
     return opts
 
 
+def _friendly_ytdlp_error(e: Exception) -> str:
+    """Traduz os erros mais comuns do yt-dlp no Instagram para algo acionavel."""
+    low = str(e).lower()
+    if "could not copy" in low and "cookie" in low:
+        return ("Nao consegui copiar o banco de cookies do navegador "
+                "(travado ou criptografado pelo Chrome — yt-dlp#7271). "
+                "Feche o navegador COMPLETAMENTE e tente de novo, ou use "
+                "'Cookies do Firefox' (feche o Firefox antes), ou cookies.txt "
+                "exportado com o Instagram aberto e logado.")
+    if "unable to extract data" in low or "empty media response" in low:
+        return ("Instagram nao devolveu os dados do perfil/post (login ou bloqueio). "
+                "Tente 'Cookies do Firefox' (feche o Firefox antes) ou cookies.txt "
+                "exportado de novo com o Instagram logado — e confira se o perfil "
+                "e publico e se voce o segue, caso seja privado.")
+    if "login" in low:
+        return ("Instagram pediu login. Use 'Cookies do Firefox' ou cookies.txt "
+                "com o Instagram logado no navegador, e feche o navegador antes de buscar.")
+    return str(e)
+
+
 def list_social_media(url: str, cookies_file: str | None = None,
                       cookies_browser: str | None = None):
     """Lista as midias de um post/carrossel/perfil via yt-dlp, sem baixar.
@@ -534,10 +558,13 @@ def list_social_media(url: str, cookies_file: str | None = None,
         if "impersonat" in str(e).lower():
             log_file(f"list_social_media: impersonate falhou ({e}), tentando sem")
             opts.pop("impersonate", None)
-            with YoutubeDL(opts) as ydl:
-                info = ydl.extract_info(url, download=False)
+            try:
+                with YoutubeDL(opts) as ydl:
+                    info = ydl.extract_info(url, download=False)
+            except Exception as e2:
+                raise RuntimeError(_friendly_ytdlp_error(e2)) from e2
         else:
-            raise
+            raise RuntimeError(_friendly_ytdlp_error(e)) from e
     if not info:
         raise RuntimeError("yt-dlp nao devolveu informacoes da pagina")
     entries = info.get("entries")
@@ -609,8 +636,11 @@ def download_with_ytdlp(url: str, out_dir: str, cookies_file: str | None,
         progress_hook(d)
 
     opts["progress_hooks"] = [_hook]
-    with YoutubeDL(opts) as ydl:
-        ydl.download([url])
+    try:
+        with YoutubeDL(opts) as ydl:
+            ydl.download([url])
+    except Exception as e:
+        raise RuntimeError(_friendly_ytdlp_error(e)) from e
     return downloaded
 
 
@@ -713,7 +743,7 @@ class App(tk.Tk):
         self.cookies_btn.pack(side="left")
         self.cookies_btn.pack_forget()
         self.cookies_var.trace_add("write", self._on_cookies_choice)
-        tk.Label(crow, text="Instagram: prefira Cookies do Chrome (logado) — cookies.txt nem sempre traz a sessão.",
+        tk.Label(crow, text="Instagram: prefira Cookies do Firefox (feche o Firefox antes) ou cookies.txt — o Chrome bloqueia a leitura do banco.",
                  bg=BG, fg=MUTED, font=("Segoe UI", 9)).pack(side="left", padx=(8, 0))
 
         # Lista
@@ -802,7 +832,7 @@ class App(tk.Tk):
             self.cookies_browser = browsers[choice]
             self.cookies_file = ""
             self.cookies_btn.pack_forget()
-            self._log(f"Cookies do navegador: {self.cookies_browser} (feche o navegador se der erro de leitura)")
+            self._log(f"Cookies do navegador: {self.cookies_browser} — FECHE o navegador completamente antes de Buscar, senao da 'Could not copy cookie database'")
         else:
             self.cookies_btn.pack_forget()
             self.cookies_file = ""
@@ -940,10 +970,10 @@ class App(tk.Tk):
                                               getattr(self, "cookies_browser", "") or None)
                 except Exception as e:
                     self._log(f"Nao consegui listar os posts: {e}")
-                    self._log("Dica: tente 'Cookies do Chrome' em Cookies (com o Instagram logado "
-                              "no Chrome) — o cookies.txt muitas vezes nao traz a sessao. "
-                              "Se usar cookies.txt, exporte de novo com o Instagram aberto e "
-                              "logado, depois clique em Buscar midias de novo.")
+                    self._log("Dica: tente 'Cookies do Firefox' em Cookies (Instagram logado no "
+                              "Firefox, feche o Firefox antes de Buscar) ou cookies.txt exportado "
+                              "de novo com o Instagram aberto e logado — o Chrome bloqueia a "
+                              "leitura do banco de cookies.")
                     self._set_status("Falha ao listar — Instagram pode estar pedindo login. Veja o registro.")
                     # Mantem o item unico como plano B: Baixar selecionadas
                     # tenta baixar o perfil/post inteiro via yt-dlp mesmo assim.
